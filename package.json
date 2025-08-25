@@ -48,7 +48,6 @@
       "node_modules/**/*",
       "public/electron.js",
       "src/services/database.js",
-      "src/services/iconGenerator.js",
       "public/assets/**/*"
     ],
     "mac": {

@@ -2,7 +2,6 @@ const { app, BrowserWindow, Tray, Menu, nativeImage, ipcMain } = require('electr
 const path = require('path');
 const isDev = process.env.NODE_ENV === 'development';
 const DatabaseService = require('../src/services/database.js');
-const IconGenerator = require('../src/services/iconGenerator.js');
 const OpenAI = require('openai');
 
 let mainWindow;
@@ -50,8 +49,12 @@ function createWindow() {
 }
 
 function createTray() {
-  // Start with the existing PNG file for now
-  const iconPath = path.join(__dirname, 'assets/trayicon-16x16.png');
+  // Use the PNG tray icon file
+  const iconPath = isDev 
+    ? path.join(__dirname, 'assets/trayicon-16x16.png')
+    : path.join(process.resourcesPath, 'app.asar.unpacked/public/assets/trayicon-16x16.png');
+  
+  console.log('Loading tray icon from:', iconPath);
   const icon = nativeImage.createFromPath(iconPath);
   icon.setTemplateImage(true);
   
@@ -76,14 +79,29 @@ function createTray() {
 }
 
 app.whenReady().then(() => {
+  // Check if app was launched at login
+  const loginItemSettings = app.getLoginItemSettings();
+  const wasAutoLaunched = loginItemSettings.wasOpenedAtLogin;
+  
   // Initialize database
   database = new DatabaseService();
   
   // Set up IPC handlers
   setupIpcHandlers();
   
+  // Configure auto-launch on first run
+  configureAutoLaunch();
+  
   createWindow();
   createTray();
+  
+  // If auto-launched, keep window hidden and show notification
+  if (wasAutoLaunched) {
+    console.log('SubSentry started automatically at login');
+  } else {
+    // Manual launch - could show window if desired, but keeping it hidden for consistency
+    console.log('SubSentry started manually');
+  }
   
   // Initial tray icon color update
   updateTrayIconColor();
@@ -111,6 +129,33 @@ app.on('before-quit', () => {
 // macOS dock icon hiding
 if (process.platform === 'darwin') {
   app.dock.hide();
+}
+
+// Auto-launch configuration
+function configureAutoLaunch() {
+  // Enable auto-launch by default on first run
+  const loginItemSettings = app.getLoginItemSettings();
+  
+  if (!loginItemSettings.wasOpenedAtLogin && !loginItemSettings.openAtLogin) {
+    // First time running - enable auto-launch
+    app.setLoginItemSettings({
+      openAtLogin: true,
+      name: 'SubSentry'
+    });
+    console.log('Auto-launch enabled for SubSentry');
+  }
+}
+
+function setAutoLaunch(enabled) {
+  app.setLoginItemSettings({
+    openAtLogin: enabled,
+    name: 'SubSentry'
+  });
+  console.log(`Auto-launch ${enabled ? 'enabled' : 'disabled'} for SubSentry`);
+}
+
+function getAutoLaunchStatus() {
+  return app.getLoginItemSettings().openAtLogin;
 }
 
 // IPC handlers for database operations
@@ -354,6 +399,26 @@ Example output format:
       throw new Error('Sorry, couldn\'t parse that. Please try again or use the manual form.');
     }
   });
+
+  // Auto-launch settings
+  ipcMain.handle('get-auto-launch-status', async () => {
+    try {
+      return getAutoLaunchStatus();
+    } catch (error) {
+      console.error('Error getting auto-launch status:', error);
+      return false;
+    }
+  });
+
+  ipcMain.handle('set-auto-launch', async (event, enabled) => {
+    try {
+      setAutoLaunch(enabled);
+      return true;
+    } catch (error) {
+      console.error('Error setting auto-launch:', error);
+      throw error;
+    }
+  });
 }
 
 // Update tray icon color based on renewal dates
@@ -383,17 +448,43 @@ function updateTrayIconColor() {
       tooltipText = `⚡ ${renewingSoon.length} subscription${renewingSoon.length > 1 ? 's' : ''} renewing soon`;
     }
     
-    // For now, let's focus on updating the tooltip and context menu
-    // The visual icon change is tricky on macOS with template images
-    tray.setToolTip(tooltipText);
+    // Update tray icon based on color
+    updateTrayIcon(iconColor);
     
-    // Update context menu with status indicator
+    // Update tooltip and context menu
+    tray.setToolTip(tooltipText);
     updateContextMenu(iconColor, renewingSoon.length, verySoon.length);
     
     console.log(`Tray status updated to: ${iconColor} (${renewingSoon.length} services renewing soon, ${verySoon.length} very soon)`);
     
   } catch (error) {
     console.error('Error updating tray icon color:', error);
+  }
+}
+
+// Update tray icon with PNG files
+function updateTrayIcon(color) {
+  if (!tray) return;
+  
+  const iconFileName = `trayicon-${color}-16x16.png`;
+  const iconPath = isDev 
+    ? path.join(__dirname, 'assets', iconFileName)
+    : path.join(process.resourcesPath, 'app.asar.unpacked/public/assets', iconFileName);
+  
+  // Fallback to default icon if colored version doesn't exist
+  const fallbackPath = isDev 
+    ? path.join(__dirname, 'assets/trayicon-16x16.png')
+    : path.join(process.resourcesPath, 'app.asar.unpacked/public/assets/trayicon-16x16.png');
+  
+  const fs = require('fs');
+  const finalPath = fs.existsSync(iconPath) ? iconPath : fallbackPath;
+  
+  try {
+    const icon = nativeImage.createFromPath(finalPath);
+    icon.setTemplateImage(color === 'gray'); // Only use template for gray icon
+    tray.setImage(icon);
+  } catch (error) {
+    console.error('Error updating tray icon:', error);
   }
 }
 
@@ -406,6 +497,8 @@ function updateContextMenu(status, renewingSoonCount, verySoonCount) {
   } else if (renewingSoonCount > 0) {
     statusLabel = `🟡 ${renewingSoonCount} renewal${renewingSoonCount > 1 ? 's' : ''} soon`;
   }
+  
+  const autoLaunchEnabled = getAutoLaunchStatus();
   
   const contextMenu = Menu.buildFromTemplate([
     {
@@ -434,6 +527,18 @@ function updateContextMenu(status, renewingSoonCount, verySoonCount) {
         }
         mainWindow.show();
         mainWindow.focus();
+      }
+    },
+    {
+      type: 'separator'
+    },
+    {
+      label: autoLaunchEnabled ? 'Disable Auto-Launch' : 'Enable Auto-Launch',
+      type: 'normal',
+      click: () => {
+        setAutoLaunch(!autoLaunchEnabled);
+        // Update the context menu to reflect the change
+        updateContextMenu(status, renewingSoonCount, verySoonCount);
       }
     },
     {
