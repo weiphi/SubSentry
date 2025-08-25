@@ -37,6 +37,29 @@
     "sqlite3": "^5.1.7",
     "uuid": "^11.1.0"
   },
+  "build": {
+    "appId": "com.weiphi.subsentry",
+    "productName": "SubSentry",
+    "directories": {
+      "output": "dist"
+    },
+    "files": [
+      "build/**/*",
+      "node_modules/**/*",
+      "public/electron.js",
+      "src/services/database.js",
+      "src/services/iconGenerator.js",
+      "public/assets/**/*"
+    ],
+    "mac": {
+      "category": "public.app-category.productivity",
+      "target": "dmg",
+      "icon": "public/assets/subsentry-logo.png"
+    },
+    "dmg": {
+      "title": "SubSentry Installer"
+    }
+  },
   "browserslist": {
     "production": [
       ">0.2%",
