@@ -2,10 +2,12 @@ import React, { useState } from 'react';
 import nlpService from '../services/nlpService';
 
 function AddServiceForm({ onSubmit, onCancel }) {
-  const [inputMode, setInputMode] = useState('natural'); // 'natural' or 'manual'
+  const [inputMode, setInputMode] = useState('natural'); // 'natural', 'manual', or 'screenshot'
   const [naturalInput, setNaturalInput] = useState('');
   const [apiKey, setApiKey] = useState('');
   const [isProcessing, setIsProcessing] = useState(false);
+  const [uploadedImage, setUploadedImage] = useState(null);
+  const [isDragOver, setIsDragOver] = useState(false);
   
   const [formData, setFormData] = useState({
     name: '',
@@ -60,6 +62,91 @@ function AddServiceForm({ onSubmit, onCancel }) {
     return newErrors;
   };
 
+  const handleImageUpload = (file) => {
+    // Validate file type
+    const allowedTypes = ['image/png', 'image/jpeg', 'image/jpg', 'image/webp'];
+    if (!allowedTypes.includes(file.type)) {
+      setErrors({ screenshot: 'Please upload a PNG, JPEG, JPG, or WEBP file' });
+      return;
+    }
+
+    // Validate file size (50MB limit)
+    if (file.size > 50 * 1024 * 1024) {
+      setErrors({ screenshot: 'File size must be less than 50MB' });
+      return;
+    }
+
+    // Convert to base64 for OpenAI API
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      setUploadedImage({
+        file,
+        dataUrl: e.target.result,
+        name: file.name
+      });
+      setErrors({});
+    };
+    reader.readAsDataURL(file);
+  };
+
+  const handleDragOver = (e) => {
+    e.preventDefault();
+    setIsDragOver(true);
+  };
+
+  const handleDragLeave = (e) => {
+    e.preventDefault();
+    setIsDragOver(false);
+  };
+
+  const handleDrop = (e) => {
+    e.preventDefault();
+    setIsDragOver(false);
+    
+    const files = e.dataTransfer.files;
+    if (files.length > 0) {
+      handleImageUpload(files[0]);
+    }
+  };
+
+  const handleFileInputChange = (e) => {
+    const files = e.target.files;
+    if (files.length > 0) {
+      handleImageUpload(files[0]);
+    }
+  };
+
+  const handleScreenshotParse = async () => {
+    if (!uploadedImage) {
+      setErrors({ screenshot: 'Please upload a screenshot first' });
+      return;
+    }
+
+    if (!apiKey.trim()) {
+      setErrors({ apiKey: 'OpenAI API key is required for screenshot processing' });
+      return;
+    }
+
+    setIsProcessing(true);
+    setErrors({});
+
+    try {
+      // Parse the screenshot using OpenAI Vision API
+      const parsedData = await nlpService.parseScreenshot(uploadedImage.dataUrl, apiKey);
+      
+      // Fill the form with parsed data
+      setFormData(parsedData);
+      setInputMode('manual'); // Switch to manual mode to show parsed data
+      
+    } catch (error) {
+      setErrors({ screenshot: error.message });
+      // Fall back to natural language input
+      setInputMode('natural');
+    } finally {
+      setIsProcessing(false);
+    }
+  };
+
   const handleNaturalLanguageParse = async () => {
     if (!naturalInput.trim()) {
       setErrors({ natural: 'Please enter a description of your subscription' });
@@ -94,6 +181,11 @@ function AddServiceForm({ onSubmit, onCancel }) {
     
     if (inputMode === 'natural') {
       handleNaturalLanguageParse();
+      return;
+    }
+    
+    if (inputMode === 'screenshot') {
+      handleScreenshotParse();
       return;
     }
     
@@ -137,6 +229,21 @@ function AddServiceForm({ onSubmit, onCancel }) {
             }}
           >
             Natural Language
+          </button>
+          <button
+            type="button"
+            onClick={() => setInputMode('screenshot')}
+            style={{
+              padding: '8px 16px',
+              border: '1px solid #007AFF',
+              background: inputMode === 'screenshot' ? '#007AFF' : 'transparent',
+              color: inputMode === 'screenshot' ? 'white' : '#007AFF',
+              borderRadius: '6px',
+              cursor: 'pointer',
+              fontSize: '14px'
+            }}
+          >
+            Upload Screenshot
           </button>
           <button
             type="button"
@@ -186,6 +293,89 @@ function AddServiceForm({ onSubmit, onCancel }) {
               {errors.natural && <div style={{ color: '#ff3b30', fontSize: '12px', marginTop: '4px' }}>{errors.natural}</div>}
               <div style={{ fontSize: '12px', color: '#666', marginTop: '4px' }}>
                 Include service name, cost, currency, specific renewal date, frequency, and optional hashtags
+              </div>
+            </div>
+          </>
+        ) : inputMode === 'screenshot' ? (
+          <>
+            {/* API Key Input */}
+            <div className="form-group">
+              <label className="form-label">OpenAI API Key</label>
+              <input
+                type="password"
+                value={apiKey}
+                onChange={(e) => setApiKey(e.target.value)}
+                className="form-input"
+                placeholder="sk-..."
+              />
+              {errors.apiKey && <div style={{ color: '#ff3b30', fontSize: '12px', marginTop: '4px' }}>{errors.apiKey}</div>}
+            </div>
+
+            {/* Screenshot Upload Area */}
+            <div className="form-group">
+              <label className="form-label">Upload Receipt Screenshot</label>
+              <div
+                onDragOver={handleDragOver}
+                onDragLeave={handleDragLeave}
+                onDrop={handleDrop}
+                style={{
+                  border: `2px dashed ${isDragOver ? '#007AFF' : '#ccc'}`,
+                  borderRadius: '8px',
+                  padding: '40px 20px',
+                  textAlign: 'center',
+                  backgroundColor: isDragOver ? '#f0f8ff' : '#fafafa',
+                  cursor: 'pointer',
+                  transition: 'all 0.2s ease'
+                }}
+                onClick={() => document.getElementById('screenshot-upload').click()}
+              >
+                {uploadedImage ? (
+                  <div>
+                    <div style={{ marginBottom: '15px' }}>
+                      <img 
+                        src={uploadedImage.dataUrl} 
+                        alt="Uploaded screenshot" 
+                        style={{ 
+                          maxWidth: '200px', 
+                          maxHeight: '200px', 
+                          objectFit: 'contain',
+                          borderRadius: '4px',
+                          border: '1px solid #ddd'
+                        }} 
+                      />
+                    </div>
+                    <div style={{ fontSize: '14px', color: '#333', marginBottom: '5px' }}>
+                      📷 {uploadedImage.name}
+                    </div>
+                    <div style={{ fontSize: '12px', color: '#666' }}>
+                      Click to replace or drag a new image here
+                    </div>
+                  </div>
+                ) : (
+                  <div>
+                    <div style={{ fontSize: '48px', marginBottom: '15px' }}>📷</div>
+                    <div style={{ fontSize: '16px', color: '#333', marginBottom: '5px' }}>
+                      Drop your receipt screenshot here
+                    </div>
+                    <div style={{ fontSize: '14px', color: '#666', marginBottom: '10px' }}>
+                      or click to browse files
+                    </div>
+                    <div style={{ fontSize: '12px', color: '#999' }}>
+                      Supports PNG, JPEG, WEBP up to 50MB
+                    </div>
+                  </div>
+                )}
+              </div>
+              <input
+                id="screenshot-upload"
+                type="file"
+                accept=".png,.jpg,.jpeg,.webp"
+                onChange={handleFileInputChange}
+                style={{ display: 'none' }}
+              />
+              {errors.screenshot && <div style={{ color: '#ff3b30', fontSize: '12px', marginTop: '4px' }}>{errors.screenshot}</div>}
+              <div style={{ fontSize: '12px', color: '#666', marginTop: '8px' }}>
+                Upload a screenshot of your subscription receipt. AI will extract service name, cost, renewal date, and other details automatically.
               </div>
             </div>
           </>
@@ -281,7 +471,7 @@ function AddServiceForm({ onSubmit, onCancel }) {
             Cancel
           </button>
           <button type="submit" className="btn btn-primary" disabled={isProcessing}>
-            {inputMode === 'natural' && !formData.name ? 
+            {(inputMode === 'natural' || inputMode === 'screenshot') && !formData.name ? 
               (isProcessing ? 'Processing...' : 'Parse') : 
               'Add Service'
             }

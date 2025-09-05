@@ -52,7 +52,7 @@ function createTray() {
   // Use the PNG tray icon file
   const iconPath = isDev 
     ? path.join(__dirname, 'assets/trayicon-16x16.png')
-    : path.join(process.resourcesPath, 'app.asar.unpacked/public/assets/trayicon-16x16.png');
+    : path.join(process.resourcesPath, 'assets/trayicon-16x16.png');
   
   console.log('Loading tray icon from:', iconPath);
   const icon = nativeImage.createFromPath(iconPath);
@@ -366,7 +366,25 @@ Example output format:
       today.setHours(0, 0, 0, 0);
       
       if (renewalDate < today) {
-        throw new Error('Renewal date cannot be in the past');
+        // For screenshot processing, calculate next renewal date based on frequency
+        const nextRenewalDate = new Date(renewalDate);
+        
+        if (parsedData.frequency === 'monthly') {
+          // Add months until we get a future date
+          while (nextRenewalDate < today) {
+            nextRenewalDate.setMonth(nextRenewalDate.getMonth() + 1);
+          }
+        } else if (parsedData.frequency === 'annual') {
+          // Add years until we get a future date
+          while (nextRenewalDate < today) {
+            nextRenewalDate.setFullYear(nextRenewalDate.getFullYear() + 1);
+          }
+        }
+        
+        // Update the renewal date to the calculated future date
+        parsedData.renewalDate = nextRenewalDate.toISOString().split('T')[0];
+        
+        console.log(`Updated past renewal date to next occurrence: ${parsedData.renewalDate}`);
       }
       
       // Ensure tags is a string
@@ -397,6 +415,166 @@ Example output format:
       
       console.error('NLP parsing error:', error);
       throw new Error('Sorry, couldn\'t parse that. Please try again or use the manual form.');
+    }
+  });
+
+  // Parse screenshot using OpenAI Vision API
+  ipcMain.handle('parse-screenshot', async (event, { imageDataUrl, apiKey }) => {
+    try {
+      const openai = new OpenAI({ apiKey });
+
+      const prompt = `
+You are analyzing a subscription service receipt or email screenshot. Extract structured data and return ONLY a valid JSON object with these exact fields:
+- name: string (service name)
+- cost: number (numeric value only, no currency symbols)
+- currency: string ("USD" or "EUR" only)
+- renewalDate: string (YYYY-MM-DD format, absolute dates only, no relative dates)
+- frequency: string ("monthly" or "annual" only)
+- tags: string (hashtags if mentioned, empty string if none)
+
+Rules:
+- Look for service names, subscription costs, billing dates, renewal dates, and billing frequency
+- If currency is not specified, assume USD
+- Extract hashtags from the text if present
+- Only accept absolute dates (specific dates, not "next month" or "in 30 days")
+- If information is missing or unclear, return null for that field
+- Return only the JSON object, no explanations
+
+Example output format:
+{
+  "name": "Netflix",
+  "cost": 15.99,
+  "currency": "USD",
+  "renewalDate": "2025-06-15",
+  "frequency": "monthly",
+  "tags": "#entertainment #streaming"
+}
+`;
+
+      const completion = await openai.chat.completions.create({
+        model: "gpt-4.1", // Using GPT-4 with vision capabilities
+        messages: [
+          {
+            role: "system",
+            content: "You are a subscription service data parser. Return only valid JSON objects with the specified structure."
+          },
+          {
+            role: "user",
+            content: [
+              {
+                type: "text",
+                text: prompt
+              },
+              {
+                type: "image_url",
+                image_url: {
+                  url: imageDataUrl
+                }
+              }
+            ]
+          }
+        ],
+        max_tokens: 300,
+        temperature: 0.1
+      });
+
+      const responseText = completion.choices[0]?.message?.content?.trim();
+      
+      if (!responseText) {
+        throw new Error('No response from OpenAI');
+      }
+
+      // Parse the JSON response
+      const parsedData = JSON.parse(responseText);
+      
+      // Validate required fields
+      const requiredFields = ['name', 'cost', 'currency', 'renewalDate', 'frequency'];
+      const missingFields = requiredFields.filter(field => 
+        parsedData[field] === null || parsedData[field] === undefined || parsedData[field] === ''
+      );
+      
+      if (missingFields.length > 0) {
+        throw new Error(`Could not parse: ${missingFields.join(', ')} missing or unclear`);
+      }
+
+      // Validate data types and values
+      if (typeof parsedData.name !== 'string') {
+        throw new Error('Service name must be text');
+      }
+      
+      if (typeof parsedData.cost !== 'number' || parsedData.cost <= 0) {
+        throw new Error('Cost must be a positive number');
+      }
+      
+      if (!['USD', 'EUR'].includes(parsedData.currency)) {
+        throw new Error('Currency must be USD or EUR');
+      }
+      
+      if (!['monthly', 'annual'].includes(parsedData.frequency)) {
+        throw new Error('Frequency must be monthly or annual');
+      }
+      
+      // Validate date format
+      const dateRegex = /^\d{4}-\d{2}-\d{2}$/;
+      if (!dateRegex.test(parsedData.renewalDate)) {
+        throw new Error('Renewal date must be in YYYY-MM-DD format');
+      }
+      
+      // Check if date is in the future
+      const renewalDate = new Date(parsedData.renewalDate);
+      const today = new Date();
+      today.setHours(0, 0, 0, 0);
+      
+      if (renewalDate < today) {
+        // For screenshot processing, calculate next renewal date based on frequency
+        const nextRenewalDate = new Date(renewalDate);
+        
+        if (parsedData.frequency === 'monthly') {
+          // Add months until we get a future date
+          while (nextRenewalDate < today) {
+            nextRenewalDate.setMonth(nextRenewalDate.getMonth() + 1);
+          }
+        } else if (parsedData.frequency === 'annual') {
+          // Add years until we get a future date
+          while (nextRenewalDate < today) {
+            nextRenewalDate.setFullYear(nextRenewalDate.getFullYear() + 1);
+          }
+        }
+        
+        // Update the renewal date to the calculated future date
+        parsedData.renewalDate = nextRenewalDate.toISOString().split('T')[0];
+        
+        console.log(`Updated past renewal date to next occurrence: ${parsedData.renewalDate}`);
+      }
+      
+      // Ensure tags is a string
+      if (parsedData.tags === null || parsedData.tags === undefined) {
+        parsedData.tags = '';
+      }
+      
+      return {
+        name: parsedData.name.trim(),
+        cost: parsedData.cost,
+        currency: parsedData.currency,
+        renewalDate: parsedData.renewalDate,
+        frequency: parsedData.frequency,
+        tags: parsedData.tags.toString().trim(),
+        status: 'active'
+      };
+      
+    } catch (error) {
+      if (error instanceof SyntaxError) {
+        throw new Error('Sorry, couldn\'t parse that screenshot. Please try the natural language input instead.');
+      }
+      
+      if (error.message.includes('Could not parse') || 
+          error.message.includes('must be') || 
+          error.message.includes('cannot be')) {
+        throw error;
+      }
+      
+      console.error('Screenshot parsing error:', error);
+      throw new Error('Sorry, couldn\'t parse that screenshot. Please try again or use the natural language input.');
     }
   });
 
@@ -469,12 +647,12 @@ function updateTrayIcon(color) {
   const iconFileName = `trayicon-${color}-16x16.png`;
   const iconPath = isDev 
     ? path.join(__dirname, 'assets', iconFileName)
-    : path.join(process.resourcesPath, 'app.asar.unpacked/public/assets', iconFileName);
+    : path.join(process.resourcesPath, 'assets', iconFileName);
   
   // Fallback to default icon if colored version doesn't exist
   const fallbackPath = isDev 
     ? path.join(__dirname, 'assets/trayicon-16x16.png')
-    : path.join(process.resourcesPath, 'app.asar.unpacked/public/assets/trayicon-16x16.png');
+    : path.join(process.resourcesPath, 'assets/trayicon-16x16.png');
   
   const fs = require('fs');
   const finalPath = fs.existsSync(iconPath) ? iconPath : fallbackPath;

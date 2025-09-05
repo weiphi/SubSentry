@@ -47,8 +47,13 @@
       "build/**/*",
       "node_modules/**/*",
       "public/electron.js",
-      "src/services/database.js",
-      "public/assets/**/*"
+      "src/services/database.js"
+    ],
+    "extraResources": [
+      {
+        "from": "public/assets",
+        "to": "assets"
+      }
     ],
     "mac": {
       "category": "public.app-category.productivity",
