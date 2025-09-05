@@ -1,13 +1,16 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import nlpService from '../services/nlpService';
 
-function AddServiceForm({ onSubmit, onCancel }) {
+const { ipcRenderer } = window.require('electron');
+
+function AddServiceForm({ onSubmit, onCancel, initialData, initialError, onDataUsed }) {
   const [inputMode, setInputMode] = useState('natural'); // 'natural', 'manual', or 'screenshot'
   const [naturalInput, setNaturalInput] = useState('');
   const [apiKey, setApiKey] = useState('');
   const [isProcessing, setIsProcessing] = useState(false);
   const [uploadedImage, setUploadedImage] = useState(null);
   const [isDragOver, setIsDragOver] = useState(false);
+  const [hasStoredApiKey, setHasStoredApiKey] = useState(false);
   
   const [formData, setFormData] = useState({
     name: '',
@@ -19,6 +22,40 @@ function AddServiceForm({ onSubmit, onCancel }) {
   });
 
   const [errors, setErrors] = useState({});
+
+  useEffect(() => {
+    loadStoredApiKey();
+    
+    // Handle initial data from drag-and-drop
+    if (initialData) {
+      setFormData(initialData);
+      setInputMode('manual'); // Switch to manual to show the parsed data
+      if (onDataUsed) {
+        onDataUsed(); // Mark the data as used
+      }
+    }
+    
+    // Handle initial error from drag-and-drop
+    if (initialError) {
+      setErrors({ screenshot: initialError });
+      setInputMode('natural'); // Switch to natural language as fallback
+      if (onDataUsed) {
+        onDataUsed(); // Mark the error as handled
+      }
+    }
+  }, [initialData, initialError, onDataUsed]);
+
+  const loadStoredApiKey = async () => {
+    try {
+      const storedKey = await ipcRenderer.invoke('get-setting', 'openai_api_key');
+      if (storedKey) {
+        setApiKey(storedKey);
+        setHasStoredApiKey(true);
+      }
+    } catch (error) {
+      console.error('Error loading stored API key:', error);
+    }
+  };
 
   const handleChange = (e) => {
     const { name, value } = e.target;
@@ -212,6 +249,36 @@ function AddServiceForm({ onSubmit, onCancel }) {
     <div className="add-service">
       <h3>Add New Service</h3>
       
+      {/* Success message for drag-and-drop */}
+      {initialData && (
+        <div style={{
+          marginBottom: '15px',
+          padding: '12px',
+          borderRadius: '6px',
+          backgroundColor: '#f0fff4',
+          border: '1px solid #28a745',
+          fontSize: '14px',
+          color: '#28a745'
+        }}>
+          ✅ Screenshot processed successfully! Review the details below and click "Add Service" to save.
+        </div>
+      )}
+      
+      {/* Error message for drag-and-drop */}
+      {initialError && (
+        <div style={{
+          marginBottom: '15px',
+          padding: '12px',
+          borderRadius: '6px',
+          backgroundColor: '#fff5f5',
+          border: '1px solid #dc3545',
+          fontSize: '14px',
+          color: '#dc3545'
+        }}>
+          ❌ Screenshot processing failed: {initialError}. Please try using the natural language input below.
+        </div>
+      )}
+      
       {/* Mode Toggle */}
       <div style={{ marginBottom: '20px', borderBottom: '1px solid #e0e0e0', paddingBottom: '15px' }}>
         <div style={{ display: 'flex', gap: '10px' }}>
@@ -269,13 +336,26 @@ function AddServiceForm({ onSubmit, onCancel }) {
             {/* API Key Input */}
             <div className="form-group">
               <label className="form-label">OpenAI API Key</label>
-              <input
-                type="password"
-                value={apiKey}
-                onChange={(e) => setApiKey(e.target.value)}
-                className="form-input"
-                placeholder="sk-..."
-              />
+              {hasStoredApiKey ? (
+                <div style={{
+                  padding: '8px 12px',
+                  backgroundColor: '#f0f8ff',
+                  border: '1px solid #007AFF',
+                  borderRadius: '6px',
+                  fontSize: '14px',
+                  color: '#007AFF'
+                }}>
+                  ✓ Using stored API key from Settings
+                </div>
+              ) : (
+                <input
+                  type="password"
+                  value={apiKey}
+                  onChange={(e) => setApiKey(e.target.value)}
+                  className="form-input"
+                  placeholder="sk-... (or set in Settings)"
+                />
+              )}
               {errors.apiKey && <div style={{ color: '#ff3b30', fontSize: '12px', marginTop: '4px' }}>{errors.apiKey}</div>}
             </div>
 
@@ -301,13 +381,26 @@ function AddServiceForm({ onSubmit, onCancel }) {
             {/* API Key Input */}
             <div className="form-group">
               <label className="form-label">OpenAI API Key</label>
-              <input
-                type="password"
-                value={apiKey}
-                onChange={(e) => setApiKey(e.target.value)}
-                className="form-input"
-                placeholder="sk-..."
-              />
+              {hasStoredApiKey ? (
+                <div style={{
+                  padding: '8px 12px',
+                  backgroundColor: '#f0f8ff',
+                  border: '1px solid #007AFF',
+                  borderRadius: '6px',
+                  fontSize: '14px',
+                  color: '#007AFF'
+                }}>
+                  ✓ Using stored API key from Settings
+                </div>
+              ) : (
+                <input
+                  type="password"
+                  value={apiKey}
+                  onChange={(e) => setApiKey(e.target.value)}
+                  className="form-input"
+                  placeholder="sk-... (or set in Settings)"
+                />
+              )}
               {errors.apiKey && <div style={{ color: '#ff3b30', fontSize: '12px', marginTop: '4px' }}>{errors.apiKey}</div>}
             </div>
 

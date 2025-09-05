@@ -61,7 +61,7 @@ function createTray() {
   tray = new Tray(icon);
   
   // Set initial tooltip and context menu
-  tray.setToolTip('SubSentry - Subscription Tracker');
+  tray.setToolTip('SubSentry - Subscription Tracker\nDrag receipt screenshots here!');
   updateContextMenu('gray', 0, 0);
 
   tray.on('click', () => {
@@ -76,6 +76,281 @@ function createTray() {
       mainWindow.focus();
     }
   });
+
+  // Add drag and drop support
+  tray.on('drop-files', async (event, files) => {
+    console.log('Files dropped on tray:', files);
+    
+    if (files.length === 0) return;
+    
+    const filePath = files[0]; // Take the first file
+    
+    // Validate file type
+    const allowedExtensions = ['.png', '.jpg', '.jpeg', '.webp'];
+    const fileExtension = path.extname(filePath).toLowerCase();
+    
+    if (!allowedExtensions.includes(fileExtension)) {
+      // Show error and open main window
+      openMainWindowWithError('Please drop a PNG, JPEG, or WEBP image file');
+      return;
+    }
+    
+    // Show processing feedback with spinning loading icon
+    tray.setToolTip('Processing screenshot...');
+    
+    // Cycle through loading1.png, loading2.png, loading3.png, loading4.png
+    let frameIndex = 1;
+    const spinInterval = setInterval(() => {
+      const loadingIconPath = isDev 
+        ? path.join(__dirname, `assets/loading${frameIndex}.png`)
+        : path.join(process.resourcesPath, `assets/loading${frameIndex}.png`);
+      
+      const loadingIcon = nativeImage.createFromPath(loadingIconPath);
+      loadingIcon.setTemplateImage(true);
+      tray.setImage(loadingIcon);
+      
+      frameIndex = frameIndex === 4 ? 1 : frameIndex + 1;
+    }, 500);
+    
+    try {
+      // Process the dropped image
+      await processDroppedImage(filePath);
+    } catch (error) {
+      console.error('Error processing dropped image:', error);
+      openMainWindowWithError('Failed to process screenshot: ' + error.message);
+    } finally {
+      // Stop spinning animation
+      clearInterval(spinInterval);
+      
+      // Restore normal icon and tooltip
+      const normalIconPath = isDev 
+        ? path.join(__dirname, 'assets/trayicon-16x16.png')
+        : path.join(process.resourcesPath, 'assets/trayicon-16x16.png');
+      
+      const normalIcon = nativeImage.createFromPath(normalIconPath);
+      normalIcon.setTemplateImage(true);
+      tray.setImage(normalIcon);
+      tray.setToolTip('SubSentry - Subscription Tracker\nDrag receipt screenshots here!');
+    }
+  });
+
+  // Enable drag and drop
+  tray.on('dragenter', () => {
+    tray.setToolTip('Drop screenshot to process...');
+  });
+
+  tray.on('dragleave', () => {
+    tray.setToolTip('SubSentry - Subscription Tracker\nDrag receipt screenshots here!');
+  });
+}
+
+// Helper function to process dropped images
+async function processDroppedImage(filePath) {
+  try {
+    // Check if we have a stored API key
+    const apiKey = database.getSetting('openai_api_key');
+    if (!apiKey) {
+      throw new Error('OpenAI API key not configured. Please set it in Settings first.');
+    }
+
+    // Convert file to base64 data URL
+    const fs = require('fs');
+    const fileBuffer = fs.readFileSync(filePath);
+    const mimeType = getMimeTypeFromExtension(path.extname(filePath));
+    const base64Data = fileBuffer.toString('base64');
+    const dataUrl = `data:${mimeType};base64,${base64Data}`;
+
+    console.log('Processing dropped image with OpenAI...');
+    
+    // Use the existing screenshot parsing logic
+    const parsedData = await parseScreenshotData(dataUrl, apiKey);
+    
+    // Open main window with parsed data
+    openMainWindowWithParsedData(parsedData);
+    
+  } catch (error) {
+    throw error;
+  }
+}
+
+// Helper function to get MIME type from file extension
+function getMimeTypeFromExtension(ext) {
+  const mimeTypes = {
+    '.png': 'image/png',
+    '.jpg': 'image/jpeg',
+    '.jpeg': 'image/jpeg',
+    '.webp': 'image/webp'
+  };
+  return mimeTypes[ext.toLowerCase()] || 'image/png';
+}
+
+// Helper function to parse screenshot data (extracted from existing handler)
+async function parseScreenshotData(imageDataUrl, apiKey) {
+  const openai = new OpenAI({ apiKey });
+
+  const prompt = `
+You are analyzing a subscription service receipt or email screenshot. Extract structured data and return ONLY a valid JSON object with these exact fields:
+- name: string (service name)
+- cost: number (numeric value only, no currency symbols)
+- currency: string ("USD" or "EUR" only)
+- renewalDate: string (YYYY-MM-DD format, absolute dates only, no relative dates)
+- frequency: string ("monthly" or "annual" only)
+- tags: string (hashtags if mentioned, empty string if none)
+
+Rules:
+- Look for service names, subscription costs, billing dates, renewal dates, and billing frequency
+- If currency is not specified, assume USD
+- Extract hashtags from the text if present
+- Only accept absolute dates (specific dates, not "next month" or "in 30 days")
+- If information is missing or unclear, return null for that field
+- Return only the JSON object, no explanations
+
+Example output format:
+{
+  "name": "Netflix",
+  "cost": 15.99,
+  "currency": "USD",
+  "renewalDate": "2025-06-15",
+  "frequency": "monthly",
+  "tags": "#entertainment #streaming"
+}
+`;
+
+  const completion = await openai.chat.completions.create({
+    model: "gpt-4.1",
+    messages: [
+      {
+        role: "system",
+        content: "You are a subscription service data parser. Return only valid JSON objects with the specified structure."
+      },
+      {
+        role: "user",
+        content: [
+          {
+            type: "text",
+            text: prompt
+          },
+          {
+            type: "image_url",
+            image_url: {
+              url: imageDataUrl
+            }
+          }
+        ]
+      }
+    ],
+    max_tokens: 300,
+    temperature: 0.1
+  });
+
+  const responseText = completion.choices[0]?.message?.content?.trim();
+  
+  if (!responseText) {
+    throw new Error('No response from OpenAI');
+  }
+
+  // Parse the JSON response
+  const parsedData = JSON.parse(responseText);
+  
+  // Apply the same validation and defaults as the main handler
+  const requiredFields = ['name', 'cost', 'currency', 'renewalDate', 'frequency'];
+  const missingFields = requiredFields.filter(field => 
+    parsedData[field] === null || parsedData[field] === undefined || parsedData[field] === ''
+  );
+  
+  if (missingFields.length > 0) {
+    // Provide defaults for missing fields when possible
+    if (missingFields.includes('frequency')) {
+      parsedData.frequency = 'monthly';
+      console.log('Processing: Frequency unclear, defaulting to monthly');
+    }
+    if (missingFields.includes('currency')) {
+      parsedData.currency = 'USD';
+      console.log('Processing: Currency unclear, defaulting to USD');
+    }
+    
+    // Only throw error for truly critical missing fields
+    const criticalFields = missingFields.filter(field => !['frequency', 'currency', 'tags'].includes(field));
+    if (criticalFields.length > 0) {
+      throw new Error(`Could not determine ${criticalFields.join(', ')} from screenshot`);
+    }
+  }
+
+  // Validate and process the data (same logic as existing handler)
+  if (typeof parsedData.name !== 'string') {
+    throw new Error('Service name must be text');
+  }
+  
+  if (typeof parsedData.cost !== 'number' || parsedData.cost <= 0) {
+    throw new Error('Cost must be a positive number');
+  }
+  
+  // Validate date format
+  const dateRegex = /^\d{4}-\d{2}-\d{2}$/;
+  if (!dateRegex.test(parsedData.renewalDate)) {
+    throw new Error('Renewal date must be in YYYY-MM-DD format');
+  }
+  
+  // Handle past dates
+  const renewalDate = new Date(parsedData.renewalDate);
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  
+  if (renewalDate < today) {
+    const nextRenewalDate = new Date(renewalDate);
+    
+    if (parsedData.frequency === 'monthly') {
+      while (nextRenewalDate < today) {
+        nextRenewalDate.setMonth(nextRenewalDate.getMonth() + 1);
+      }
+    } else if (parsedData.frequency === 'annual') {
+      while (nextRenewalDate < today) {
+        nextRenewalDate.setFullYear(nextRenewalDate.getFullYear() + 1);
+      }
+    }
+    
+    parsedData.renewalDate = nextRenewalDate.toISOString().split('T')[0];
+    console.log(`Updated past renewal date to next occurrence: ${parsedData.renewalDate}`);
+  }
+  
+  // Ensure tags is a string
+  if (parsedData.tags === null || parsedData.tags === undefined) {
+    parsedData.tags = '';
+  }
+  
+  return {
+    name: parsedData.name.trim(),
+    cost: parsedData.cost,
+    currency: parsedData.currency,
+    renewalDate: parsedData.renewalDate,
+    frequency: parsedData.frequency,
+    tags: parsedData.tags.toString().trim(),
+    status: 'active'
+  };
+}
+
+// Helper function to open main window with parsed data
+function openMainWindowWithParsedData(parsedData) {
+  if (mainWindow === null) {
+    createWindow();
+  }
+  mainWindow.show();
+  mainWindow.focus();
+  
+  // Send the parsed data to the renderer process
+  mainWindow.webContents.send('show-add-service-with-data', parsedData);
+}
+
+// Helper function to open main window with error
+function openMainWindowWithError(errorMessage) {
+  if (mainWindow === null) {
+    createWindow();
+  }
+  mainWindow.show();
+  mainWindow.focus();
+  
+  // Send error to the renderer process
+  mainWindow.webContents.send('show-add-service-with-error', errorMessage);
 }
 
 app.whenReady().then(() => {
@@ -334,7 +609,21 @@ Example output format:
       );
       
       if (missingFields.length > 0) {
-        throw new Error(`Could not parse: ${missingFields.join(', ')} missing or unclear`);
+        // Provide defaults for missing fields when possible, only fail for critical ones
+        if (missingFields.includes('frequency')) {
+          parsedData.frequency = 'monthly';
+          console.log('Processing: Frequency unclear, defaulting to monthly');
+        }
+        if (missingFields.includes('currency')) {
+          parsedData.currency = 'USD';
+          console.log('Processing: Currency unclear, defaulting to USD');
+        }
+        
+        // Only throw error for truly critical missing fields
+        const criticalFields = missingFields.filter(field => !['frequency', 'currency', 'tags'].includes(field));
+        if (criticalFields.length > 0) {
+          throw new Error(`Could not determine ${criticalFields.join(', ')} from input`);
+        }
       }
 
       // Validate data types and values
@@ -494,7 +783,21 @@ Example output format:
       );
       
       if (missingFields.length > 0) {
-        throw new Error(`Could not parse: ${missingFields.join(', ')} missing or unclear`);
+        // Provide defaults for missing fields when possible, only fail for critical ones
+        if (missingFields.includes('frequency')) {
+          parsedData.frequency = 'monthly';
+          console.log('Processing: Frequency unclear, defaulting to monthly');
+        }
+        if (missingFields.includes('currency')) {
+          parsedData.currency = 'USD';
+          console.log('Processing: Currency unclear, defaulting to USD');
+        }
+        
+        // Only throw error for truly critical missing fields
+        const criticalFields = missingFields.filter(field => !['frequency', 'currency', 'tags'].includes(field));
+        if (criticalFields.length > 0) {
+          throw new Error(`Could not determine ${criticalFields.join(', ')} from input`);
+        }
       }
 
       // Validate data types and values
@@ -594,6 +897,74 @@ Example output format:
       return true;
     } catch (error) {
       console.error('Error setting auto-launch:', error);
+      throw error;
+    }
+  });
+
+  // Settings IPC handlers
+  ipcMain.handle('get-setting', async (event, key) => {
+    try {
+      return database.getSetting(key);
+    } catch (error) {
+      console.error('Error getting setting:', error);
+      return null;
+    }
+  });
+
+  ipcMain.handle('set-setting', async (event, key, value) => {
+    try {
+      return database.setSetting(key, value);
+    } catch (error) {
+      console.error('Error setting setting:', error);
+      throw error;
+    }
+  });
+
+  ipcMain.handle('delete-setting', async (event, key) => {
+    try {
+      return database.deleteSetting(key);
+    } catch (error) {
+      console.error('Error deleting setting:', error);
+      throw error;
+    }
+  });
+
+  ipcMain.handle('get-all-settings', async () => {
+    try {
+      return database.getAllSettings();
+    } catch (error) {
+      console.error('Error getting all settings:', error);
+      return {};
+    }
+  });
+
+  // Test API key with haiku generation
+  ipcMain.handle('test-api-key', async (event, apiKey) => {
+    try {
+      const openai = new OpenAI({ apiKey });
+
+      const completion = await openai.chat.completions.create({
+        model: "gpt-4.1",
+        messages: [
+          {
+            role: "user",
+            content: "Write a haiku about subscriptions"
+          }
+        ],
+        max_tokens: 100,
+        temperature: 0.7
+      });
+
+      const haiku = completion.choices[0]?.message?.content?.trim();
+      
+      if (!haiku) {
+        throw new Error('No response from OpenAI');
+      }
+
+      return { haiku };
+      
+    } catch (error) {
+      console.error('API key test error:', error);
       throw error;
     }
   });
@@ -711,12 +1082,16 @@ function updateContextMenu(status, renewingSoonCount, verySoonCount) {
       type: 'separator'
     },
     {
-      label: autoLaunchEnabled ? 'Disable Auto-Launch' : 'Enable Auto-Launch',
+      label: 'Settings',
       type: 'normal',
       click: () => {
-        setAutoLaunch(!autoLaunchEnabled);
-        // Update the context menu to reflect the change
-        updateContextMenu(status, renewingSoonCount, verySoonCount);
+        if (mainWindow === null) {
+          createWindow();
+        }
+        mainWindow.show();
+        mainWindow.focus();
+        // Send IPC message to show settings page
+        mainWindow.webContents.send('show-settings');
       }
     },
     {

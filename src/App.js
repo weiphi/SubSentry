@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import ActiveServices from './components/ActiveServices';
 import InactiveServices from './components/InactiveServices';
+import SettingsPage from './components/SettingsPage';
 
 const { ipcRenderer } = window.require('electron');
 
@@ -8,6 +9,9 @@ function App() {
   const [activeTab, setActiveTab] = useState('active');
   const [services, setServices] = useState([]);
   const [totals, setTotals] = useState({ USD: 0, EUR: 0 });
+  const [showSettings, setShowSettings] = useState(false);
+  const [dragDropData, setDragDropData] = useState(null);
+  const [dragDropError, setDragDropError] = useState(null);
 
   useEffect(() => {
     // Load initial data
@@ -20,8 +24,32 @@ function App() {
       loadTotals();
     });
 
+    // Listen for settings page requests
+    ipcRenderer.on('show-settings', () => {
+      setShowSettings(true);
+    });
+
+    // Listen for drag-and-drop parsed data
+    ipcRenderer.on('show-add-service-with-data', (event, parsedData) => {
+      setActiveTab('active'); // Switch to active tab
+      setShowSettings(false); // Make sure we're not in settings
+      setDragDropData(parsedData);
+      setDragDropError(null);
+    });
+
+    // Listen for drag-and-drop errors
+    ipcRenderer.on('show-add-service-with-error', (event, errorMessage) => {
+      setActiveTab('active'); // Switch to active tab
+      setShowSettings(false); // Make sure we're not in settings
+      setDragDropError(errorMessage);
+      setDragDropData(null);
+    });
+
     return () => {
       ipcRenderer.removeAllListeners('services-updated');
+      ipcRenderer.removeAllListeners('show-settings');
+      ipcRenderer.removeAllListeners('show-add-service-with-data');
+      ipcRenderer.removeAllListeners('show-add-service-with-error');
     };
   }, []);
 
@@ -57,6 +85,10 @@ function App() {
   const activeServices = services.filter(service => service.status === 'active');
   const inactiveServices = services.filter(service => service.status === 'inactive');
 
+  if (showSettings) {
+    return <SettingsPage onBack={() => setShowSettings(false)} />;
+  }
+
   return (
     <div className="app">
       <div className="totals">
@@ -90,6 +122,12 @@ function App() {
           <ActiveServices 
             services={activeServices} 
             onServiceUpdate={handleServiceUpdate}
+            dragDropData={dragDropData}
+            dragDropError={dragDropError}
+            onDragDropDataUsed={() => {
+              setDragDropData(null);
+              setDragDropError(null);
+            }}
           />
         )}
         {activeTab === 'inactive' && (

@@ -30,6 +30,17 @@ class DatabaseService {
 
     this.db.exec(createTableSQL);
 
+    // Create settings table
+    const createSettingsTableSQL = `
+      CREATE TABLE IF NOT EXISTS settings (
+        key TEXT PRIMARY KEY,
+        value TEXT,
+        created_date DATETIME DEFAULT CURRENT_TIMESTAMP,
+        modified_date DATETIME DEFAULT CURRENT_TIMESTAMP
+      )
+    `;
+    this.db.exec(createSettingsTableSQL);
+
     // Create indexes for better performance
     this.db.exec('CREATE INDEX IF NOT EXISTS idx_renewal_date ON services(renewal_date)');
     this.db.exec('CREATE INDEX IF NOT EXISTS idx_status ON services(status)');
@@ -212,6 +223,36 @@ class DatabaseService {
     `);
 
     return stmt.all();
+  }
+
+  // Settings operations
+  getSetting(key) {
+    const stmt = this.db.prepare('SELECT value FROM settings WHERE key = ?');
+    const result = stmt.get(key);
+    return result ? result.value : null;
+  }
+
+  setSetting(key, value) {
+    const stmt = this.db.prepare(`
+      INSERT OR REPLACE INTO settings (key, value, modified_date) 
+      VALUES (?, ?, CURRENT_TIMESTAMP)
+    `);
+    return stmt.run(key, value);
+  }
+
+  deleteSetting(key) {
+    const stmt = this.db.prepare('DELETE FROM settings WHERE key = ?');
+    return stmt.run(key);
+  }
+
+  getAllSettings() {
+    const stmt = this.db.prepare('SELECT key, value FROM settings');
+    const results = stmt.all();
+    const settings = {};
+    results.forEach(row => {
+      settings[row.key] = row.value;
+    });
+    return settings;
   }
 
   close() {

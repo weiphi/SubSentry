@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import ServiceList from './ServiceList';
 import AddServiceForm from './AddServiceForm';
 import EditServiceModal from './EditServiceModal';
@@ -6,7 +6,7 @@ import SearchFilterBar from './SearchFilterBar';
 
 const { ipcRenderer } = window.require('electron');
 
-function ActiveServices({ services, onServiceUpdate }) {
+function ActiveServices({ services, onServiceUpdate, dragDropData, dragDropError, onDragDropDataUsed }) {
   const [showAddForm, setShowAddForm] = useState(false);
   const [editingService, setEditingService] = useState(null);
   const [showEditModal, setShowEditModal] = useState(false);
@@ -15,6 +15,13 @@ function ActiveServices({ services, onServiceUpdate }) {
   const [searchQuery, setSearchQuery] = useState('');
   const [currencyFilter, setCurrencyFilter] = useState('all');
   const [tagFilter, setTagFilter] = useState('all');
+
+  // Handle drag-and-drop data
+  useEffect(() => {
+    if (dragDropData || dragDropError) {
+      setShowAddForm(true);
+    }
+  }, [dragDropData, dragDropError]);
 
   const handleAddService = async (serviceData) => {
     try {
@@ -133,7 +140,15 @@ function ActiveServices({ services, onServiceUpdate }) {
       {showAddForm && (
         <AddServiceForm 
           onSubmit={handleAddService}
-          onCancel={() => setShowAddForm(false)}
+          onCancel={() => {
+            setShowAddForm(false);
+            if (onDragDropDataUsed) {
+              onDragDropDataUsed(); // Clear drag-drop data when canceling
+            }
+          }}
+          initialData={dragDropData}
+          initialError={dragDropError}
+          onDataUsed={onDragDropDataUsed}
         />
       )}
 
