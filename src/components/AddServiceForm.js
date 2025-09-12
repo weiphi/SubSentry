@@ -38,7 +38,7 @@ function AddServiceForm({ onSubmit, onCancel, initialData, initialError, onDataU
     // Handle initial error from drag-and-drop
     if (initialError) {
       setErrors({ screenshot: initialError });
-      setInputMode('natural'); // Switch to natural language as fallback
+      setInputMode('screenshot'); // Switch to screenshot tab to show the error
       if (onDataUsed) {
         onDataUsed(); // Mark the error as handled
       }
