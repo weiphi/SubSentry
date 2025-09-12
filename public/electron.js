@@ -51,12 +51,12 @@ function createWindow() {
 function createTray() {
   // Use the PNG tray icon file
   const iconPath = isDev 
-    ? path.join(__dirname, 'assets/trayicon-16x16.png')
-    : path.join(process.resourcesPath, 'assets/trayicon-16x16.png');
+    ? path.join(__dirname, 'assets/SubSentry-Icon-16.png')
+    : path.join(process.resourcesPath, 'assets/SubSentry-Icon-16.png');
   
   console.log('Loading tray icon from:', iconPath);
   const icon = nativeImage.createFromPath(iconPath);
-  icon.setTemplateImage(true);
+  icon.setTemplateImage(false);
   
   tray = new Tray(icon);
   
@@ -124,11 +124,11 @@ function createTray() {
       
       // Restore normal icon and tooltip
       const normalIconPath = isDev 
-        ? path.join(__dirname, 'assets/trayicon-16x16.png')
-        : path.join(process.resourcesPath, 'assets/trayicon-16x16.png');
+        ? path.join(__dirname, 'assets/SubSentry-Icon-16.png')
+        : path.join(process.resourcesPath, 'assets/SubSentry-Icon-16.png');
       
       const normalIcon = nativeImage.createFromPath(normalIconPath);
-      normalIcon.setTemplateImage(true);
+      normalIcon.setTemplateImage(false);
       tray.setImage(normalIcon);
       tray.setToolTip('SubSentry - Subscription Tracker\nDrag receipt screenshots here!');
     }
@@ -1015,22 +1015,15 @@ function updateTrayIconColor() {
 function updateTrayIcon(color) {
   if (!tray) return;
   
-  const iconFileName = `trayicon-${color}-16x16.png`;
+  // Always use the SubSentry icon regardless of color for now
+  // TODO: Create SubSentry-Alert-16.png, SubSentry-Danger-16.png for colored states
   const iconPath = isDev 
-    ? path.join(__dirname, 'assets', iconFileName)
-    : path.join(process.resourcesPath, 'assets', iconFileName);
-  
-  // Fallback to default icon if colored version doesn't exist
-  const fallbackPath = isDev 
-    ? path.join(__dirname, 'assets/trayicon-16x16.png')
-    : path.join(process.resourcesPath, 'assets/trayicon-16x16.png');
-  
-  const fs = require('fs');
-  const finalPath = fs.existsSync(iconPath) ? iconPath : fallbackPath;
+    ? path.join(__dirname, 'assets/SubSentry-Icon-16.png')
+    : path.join(process.resourcesPath, 'assets/SubSentry-Icon-16.png');
   
   try {
-    const icon = nativeImage.createFromPath(finalPath);
-    icon.setTemplateImage(color === 'gray'); // Only use template for gray icon
+    const icon = nativeImage.createFromPath(iconPath);
+    icon.setTemplateImage(false); // Disable template image to show actual colors
     tray.setImage(icon);
   } catch (error) {
     console.error('Error updating tray icon:', error);
