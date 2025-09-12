@@ -45,11 +45,20 @@ function App() {
       setDragDropData(null);
     });
 
+    // Listen for show Add New Service dialog request
+    ipcRenderer.on('show-add-service-dialog', () => {
+      setActiveTab('active'); // Switch to active tab
+      setShowSettings(false); // Make sure we're not in settings
+      setDragDropData({ showDialog: true }); // Signal to show the dialog
+      setDragDropError(null);
+    });
+
     return () => {
       ipcRenderer.removeAllListeners('services-updated');
       ipcRenderer.removeAllListeners('show-settings');
       ipcRenderer.removeAllListeners('show-add-service-with-data');
       ipcRenderer.removeAllListeners('show-add-service-with-error');
+      ipcRenderer.removeAllListeners('show-add-service-dialog');
     };
   }, []);
 

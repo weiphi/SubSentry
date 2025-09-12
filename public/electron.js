@@ -1040,28 +1040,57 @@ function updateTrayIcon(color) {
 function updateContextMenu(status, renewingSoonCount, verySoonCount) {
   if (!tray) return;
   
-  let statusLabel = '✅ All good';
-  if (verySoonCount > 0) {
-    statusLabel = `🔴 ${verySoonCount} renewal${verySoonCount > 1 ? 's' : ''} ≤2 days!`;
-  } else if (renewingSoonCount > 0) {
-    statusLabel = `🟡 ${renewingSoonCount} renewal${renewingSoonCount > 1 ? 's' : ''} soon`;
+  // Get next 5 active services ordered by renewal date
+  const allServices = database ? database.getAllServices() : [];
+  const activeServices = allServices.filter(service => service.status === 'active');
+  const next5Services = activeServices.slice(0, 5);
+  
+  // Create menu items for the next 5 services
+  const serviceMenuItems = [];
+  
+  next5Services.forEach(service => {
+    // Calculate days until renewal
+    const renewalDate = new Date(service.renewal_date);
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    renewalDate.setHours(0, 0, 0, 0);
+    
+    const timeDiff = renewalDate.getTime() - today.getTime();
+    const daysUntil = Math.ceil(timeDiff / (1000 * 3600 * 24));
+    
+    // Format the label
+    const dayText = daysUntil === 1 ? 'day' : 'days';
+    const label = `${service.name} (${daysUntil} ${dayText})`;
+    
+    serviceMenuItems.push({
+      label: label,
+      enabled: false
+    });
+  });
+  
+  // Add separator after service items if there are any
+  if (serviceMenuItems.length > 0) {
+    serviceMenuItems.push({
+      type: 'separator'
+    });
   }
   
   const autoLaunchEnabled = getAutoLaunchStatus();
   
   const contextMenu = Menu.buildFromTemplate([
-    {
-      label: statusLabel,
-      enabled: false
-    },
-    {
-      type: 'separator'
-    },
+    ...serviceMenuItems,
     {
       label: 'Quick Add Service',
       type: 'normal',
       click: () => {
         console.log('Quick add clicked');
+        if (mainWindow === null) {
+          createWindow();
+        }
+        mainWindow.show();
+        mainWindow.focus();
+        // Send IPC message to show Add New Service dialog
+        mainWindow.webContents.send('show-add-service-dialog');
       }
     },
     {
