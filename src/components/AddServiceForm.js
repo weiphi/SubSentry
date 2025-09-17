@@ -284,21 +284,6 @@ function AddServiceForm({ onSubmit, onCancel, initialData, initialError, onDataU
         <div style={{ display: 'flex', gap: '10px' }}>
           <button
             type="button"
-            onClick={() => setInputMode('natural')}
-            style={{
-              padding: '8px 16px',
-              border: '1px solid #007AFF',
-              background: inputMode === 'natural' ? '#007AFF' : 'transparent',
-              color: inputMode === 'natural' ? 'white' : '#007AFF',
-              borderRadius: '6px',
-              cursor: 'pointer',
-              fontSize: '14px'
-            }}
-          >
-            Natural Language
-          </button>
-          <button
-            type="button"
             onClick={() => setInputMode('screenshot')}
             style={{
               padding: '8px 16px',
@@ -311,6 +296,21 @@ function AddServiceForm({ onSubmit, onCancel, initialData, initialError, onDataU
             }}
           >
             Upload Screenshot
+          </button>
+          <button
+            type="button"
+            onClick={() => setInputMode('natural')}
+            style={{
+              padding: '8px 16px',
+              border: '1px solid #007AFF',
+              background: inputMode === 'natural' ? '#007AFF' : 'transparent',
+              color: inputMode === 'natural' ? 'white' : '#007AFF',
+              borderRadius: '6px',
+              cursor: 'pointer',
+              fontSize: '14px'
+            }}
+          >
+            Natural Language
           </button>
           <button
             type="button"
